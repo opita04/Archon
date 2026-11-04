@@ -27,7 +27,7 @@ import { gateOccurrence } from '../../../schemas/workflow-run';
 import type { ApprovalContext } from '../../../schemas';
 import { getWorkflowEventEmitter } from '../../../event-emitter';
 import { declaredOutputPathsFromSchema, canonicalValueText } from '../../../output-ref';
-import { writeNodeArtifactsListing } from '../../../artifacts-index';
+import { writeInvocationListings } from '../../../invocation-listings';
 import { logNodeComplete } from '../../../logger';
 import { currentAdoptedRunDir, substituteWorkflowVariables } from '../../../workflow-variables';
 import { detectCompletionSignal, stripCompletionTags } from '../../../executor-shared';
@@ -321,7 +321,7 @@ async function runUntilBash(
   // Resolve outside the try so ARCHON_BASH_PATH validation errors bubble up
   // to the caller instead of being swallowed by the per-iteration catch.
   const loopBashPath = resolveBashPath();
-  const typedArtifactsFile = await writeNodeArtifactsListing(artifactsDir, workflowRun.id);
+  const listings = await writeInvocationListings(ctx);
   try {
     const { prompt: substitutedBash } = substituteWorkflowVariables(
       untilBash,
@@ -337,7 +337,7 @@ async function runUntilBash(
       {
         shellSafe: true,
         stateDir,
-        typedArtifactsFile,
+        ...listings,
         references: nodeTemplateReferences(untilBash, ctx, 'shell', {
           artifactsDir,
           requiredContext: { consumerId: node.id, field: 'loop.until_bash' },
@@ -376,7 +376,7 @@ async function runUntilBash(
           rejectionReason: '',
           issueContext: ctx.issueContext,
           adoptedRunDir: currentAdoptedRunDir(),
-          typedArtifactsFile,
+          ...listings,
           nodeExecution: state.execution,
         }),
       }
