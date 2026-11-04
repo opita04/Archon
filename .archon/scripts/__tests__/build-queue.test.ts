@@ -19,7 +19,6 @@ import {
   itemPullRequest,
   ROUTE_DECISIONS,
 } from '../../workflows/sdlc/.shared/build';
-import { BUILD_QUEUE_SELECTIONS } from '../../workflows/sdlc/.shared/launch';
 import { reviewCommentBody } from '../../workflows/sdlc/.shared/review-comment';
 import { mergeWaits } from '../../workflows/sdlc/.shared/merge';
 import { CONFIDENCES, checkAttention, chosen, renderAttention, withOther } from '../../workflows/sdlc/.shared/queue';
@@ -202,8 +201,6 @@ describe('the build record', () => {
     const workflow = Bun.YAML.parse(
       readFileSync(join(PACK, 'build-queue/archon-build-queue.yaml'), 'utf8')
     ) as { inputs: Record<string, unknown>; nodes: { id: string; output_format?: { properties: Record<string, unknown> } }[] };
-    // A new input fails here until someone decides whether a next round keeps it.
-    expect(Object.keys(workflow.inputs).sort()).toEqual([...BUILD_QUEUE_SELECTIONS, 'number', 'repo_host', 'repo_path'].sort());
     const field = (id: string, name: string) =>
       workflow.nodes.find(node => node.id === id)?.output_format?.properties[name] as
         | (Enum & AttentionSchema)
@@ -320,19 +317,20 @@ function ok(result: ScriptRun): Record<string, unknown> {
 const ENDING = { delivered: false, reason: 'review_open', pr_url: 'https://ghe.example.com/example/repo/pull/42', summary: 'Not ready: one finding' };
 const CLAIMED = { claim: { run_id: 'run-1', at: AT, requests: [] } };
 
-/** Non-default selections on a run that named no item, so its own `number` is empty. */
-const SELECTED = { INPUTS_RETRIAGE_AS: 'maintainer', INPUTS_ROUND_LIMIT: '5', INPUTS_NUMBER: '' };
+/** A run that named no item, whose operator set the build-queue binding. */
+const SELECTED = { INPUTS_BUILD_QUEUE_BINDING: '/bindings/build-queue.json', INPUTS_NUMBER: '' };
 
-/** The next round keeps the run's config and selections, and targets the item it continues. */
+/**
+ * The next round fires the build-queue binding for the item it continues, keyed by the
+ * item and this run alone, so a retry repeats the key and starts nothing twice.
+ */
 function expectNextRound(calls: string): void {
-  const launch = readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[]).find(argv => argv[1] === 'run');
-  expect(launch).toEqual(
-    expect.arrayContaining([
-      'archon-build-queue', 'retriage_as=maintainer', 'round_limit=5', 'number=7',
-      '--config-from-run', 'run-1', '--detach',
-    ])
-  );
-  expect(launch?.filter(arg => arg.startsWith('number='))).toEqual(['number=7']);
+  const fire = readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[]).find(argv => argv[0] === 'trigger');
+  expect(fire?.slice(0, 6)).toEqual([
+    'trigger', 'fire', '--config', '/bindings/build-queue.json', '--delivery-id', 'build-round:ghe.example.com/example/repo#7:run-1',
+  ]);
+  const inputs = fire?.[fire.indexOf('--inputs') + 1] ?? '';
+  expect(JSON.parse(readFileSync(inputs, 'utf8'))).toEqual({ number: '7', repo_host: 'ghe.example.com', repo_path: 'example/repo' });
 }
 
 function applyInputs(answer: Record<string, unknown>): Record<string, string> {
@@ -714,9 +712,8 @@ describe('the build queue scripts', () => {
     const calls = join(track(mkdtempSync(join(tmpdir(), 'archon-calls-'))), 'calls.jsonl');
     const applied = run(at, 'apply', { ...applyInputs(CONTINUE), ...SELECTED, ARCHON_CALL_LOG: calls });
     expect(ok(applied)).toMatchObject({ decision: 'continue', attention: '', options: [], asked: null });
-    // The next round runs on the run config and the input selections this run started with.
     expectNextRound(calls);
-    expect(ok(applied).summary).toContain('next round started at once (run launched-archon-build-queue)');
+    expect(ok(applied).summary).toContain('its next round started at once (run fired-run)');
     const doc = stored(at).value;
     expect(doc).toMatchObject({
       claim: null,
@@ -737,11 +734,12 @@ describe('the build queue scripts', () => {
     seed(at, triaged(CLAIMED));
     const applied = run(at, 'apply', {
       ...applyInputs(CONTINUE),
+      ...SELECTED,
       ARCHON_RUN_REFUSES: '1',
     });
     expect(applied.code).toBe(0);
-    expect(applied.stderr).toContain('the next round did not start');
-    expect((JSON.parse(applied.stdout) as { summary: string }).summary).toContain('the next queue run picks it up');
+    expect(applied.stderr).toContain('its next round did not start');
+    expect((JSON.parse(applied.stdout) as { summary: string }).summary).toContain('the next queue run picks up its next round');
     expect(stored(at).value).toMatchObject({ claim: null, facts: { build: { status: 'next', brief: 'continue PR 42 on R1' } } });
   }, 60_000);
 
@@ -869,9 +867,9 @@ describe('the build queue scripts', () => {
       ARCHON_CALL_LOG: calls,
     });
     const output = ok(ruled);
-    // The answer continues the item at once, on the run config and input selections the answered run started with.
+    // The answer continues the item at once through the build-queue binding.
     expectNextRound(calls);
-    expect(output.summary).toContain('next round started at once (run launched-archon-build-queue)');
+    expect(output.summary).toContain('its next round started at once (run fired-run)');
     const heading = output.section as string;
     expect(heading).toMatch(/^Current scope \(maintainer ruling on the build queue's question on a stopped run, \d{4}-\d{2}-\d{2}\)$/);
     expect(ruled.bodies).toEqual([
