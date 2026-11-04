@@ -403,3 +403,17 @@ describe("deliver's round", () => {
     });
   });
 });
+
+describe('steps whose forge read does not exist yet', () => {
+  it.each([
+    ['metrics-prs/scripts/prs', 'pr.view with createdAt, mergedAt and closedAt'],
+    ['metrics-test-value/scripts/prs', 'pr.view with createdAt, mergedAt and closedAt'],
+    ['metrics-test-value-judge/scripts/read', 'pr.files'],
+  ])('%s refuses, naming the forge operation it needs, and calls nothing', (script, operation) => {
+    const run = runPackScript(script, { inputs: { INPUTS_SINCE: '7d', INPUTS_PR: PR_URL } });
+    expect(run.code).not.toBe(0);
+    expect(run.stdout).toBe('');
+    expect(run.stderr).toContain(operation);
+    expect(run.forge).toEqual([]);
+  });
+});

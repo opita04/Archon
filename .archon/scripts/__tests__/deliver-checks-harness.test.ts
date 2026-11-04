@@ -47,3 +47,12 @@ test('pack script inputs come from fixtures, including when Bun finds an env fil
     }
   }
 });
+
+test('a pack script that spawns gh fails the test, naming the call', () => {
+  expect(() =>
+    runPackScript('investigate/scripts/verdict', {
+      inputs: { INPUTS_VERDICT: 'rooted', INPUTS_SUMMARY: 's', INPUTS_REPORT: '{}' },
+      preload: `Bun.spawnSync(['gh', 'pr', 'list']);`,
+    })
+  ).toThrow('the pack script spawned gh: pr list');
+});
