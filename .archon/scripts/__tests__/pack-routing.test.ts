@@ -155,11 +155,10 @@ describe("upkeep's terminal outcome", () => {
 
 describe("deliver's terminal outcome", () => {
   interface Outcome { ready: boolean; reason: string; pr_url: string; summary: string }
-  const outcome = (rounds: object, source = 'gh'): Outcome => {
+  const outcome = (rounds: object): Outcome => {
     const run = runPackScript('deliver/scripts/outcome', {
       inputs: {
         INPUTS_ROUNDS: JSON.stringify(rounds),
-        INPUTS_SOURCE: source,
         TYPED_ARTIFACTS_FILE: '{ARTIFACTS}/listing.json',
       },
       artifacts: { 'listing.json': EMPTY_LISTING },
@@ -176,22 +175,11 @@ describe("deliver's terminal outcome", () => {
     expect(blocked).toMatchObject({ ready: false, reason: 'implement_blocked', pr_url: '' });
       });
 
-  it('says review threads were not checked on the forge source', () => {
-    const forge = outcome(
-      { ready: true, reason: 'delivered', pr_url: PR_URL, contract_left: [], summary: 'Round 1: delivered. all passed' },
-      'forge'
-    );
-    expect(forge.summary).toContain('Review threads');
-    const noPr = outcome({ ready: false, reason: 'implement_blocked', pr_url: '', contract_left: null, summary: 'x' }, 'forge');
-    expect(noPr.summary).not.toContain('Review threads');
-  });
-
   it('lists the contract items the latest review left open', () => {
     const partial = outcome({
       ready: true,
       reason: 'delivered',
       pr_url: PR_URL,
-     
       contract_left: ['acceptance: the console shows it (deferred)'],
       summary: 'Round 1: delivered. all passed',
     });

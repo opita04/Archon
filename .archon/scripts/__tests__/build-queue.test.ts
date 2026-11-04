@@ -33,8 +33,8 @@ import {
   type WorkItem,
 } from '../../workflows/sdlc/.shared/workitem';
 import {
-  type GhApiIssue, type GhCommentRow, type GhPr, type ScriptOptions, type ScriptRun,
-  forgePrRecord, gitCheckout, hostCli, PACK, packScriptRunner, PR,
+  type TrackerSubject, type TrackerComment, type TrackerPr, type ScriptOptions, type ScriptRun,
+  forgeCalls, forgePrRecord, gitCheckout, hostCli, labelWrites, PACK, packScriptRunner, PR,
 } from './deliver-checks-harness';
 
 const { runPackScript } = packScriptRunner();
@@ -280,20 +280,18 @@ function run(
   script: 'facts' | 'blocked' | 'apply' | 'checkout' | 'ruling' | 'retriage',
   inputs: Record<string, string>,
   options: {
-    issue?: GhApiIssue;
-    pr?: GhPr;
-    comments?: readonly GhCommentRow[];
+    issue?: TrackerSubject;
+    pr?: TrackerPr;
+    comments?: readonly TrackerComment[];
     writeLost?: boolean;
-    source?: ScriptOptions['source'];
     preload?: ScriptOptions['preload'];
   } = {}
 ): ScriptRun {
   return runPackScript(`build-queue/scripts/${script}`, {
     cwd: at.checkout,
-    source: options.source,
     preload: options.preload,
-    forge: { kind: 'command', argv: [process.execPath, FAKE_ARCHON] },
-    gh: {
+    forge: { kind: 'command', argv: [process.execPath, FAKE_ARCHON], fakeForge: true },
+    tracker: {
       issue: { number: 7, author: 'Maintainer', body: 'The contract.', ...options.issue },
       issueLabels: ['archon-ready'],
       repositoryLabels: [],
@@ -357,12 +355,11 @@ const READY_CASES = [
 ] as const;
 type ReadyCase = (typeof READY_CASES)[number];
 
-function readyPreload(source: 'gh' | 'forge', scenario: ReadyCase): string {
+function readyPreload(scenario: ReadyCase): string {
   return `
 import { writeFileSync } from 'node:fs';
 import { forgeOperation, forgeFailure } from ${JSON.stringify(resolve(import.meta.dir, 'deliver-checks-harness.ts'))};
 const scenario = ${JSON.stringify(scenario)};
-const selected = ${JSON.stringify(source)};
 const current = ${JSON.stringify(forgePrRecord({ head_revision: HEAD_A }))};
 const calls = [];
 const writes = [];
@@ -374,26 +371,15 @@ const delegate = Bun.spawnSync.bind(Bun);
 const save = () => writeFileSync('{ARTIFACTS}/ready-state.json', JSON.stringify({ current, calls, writes }));
 const response = (op, failure) => {
   save();
-  const ghRow = {
-    number: current.number, url: current.url, state: current.state.toUpperCase(),
-    isDraft: current.is_draft, headRefOid: current.head_revision,
-    headRefName: current.head, baseRefName: current.base,
-    headRepository: { name: 'repo' }, headRepositoryOwner: { login: 'example' },
-    maintainerCanModify: null,
-  };
-  const stdout = selected === 'forge'
-    ? failure ? forgeFailure(op, scenario === 'unknown' ? 'outcome_unknown' : scenario === 'readback-failed' ? 'verification_failed' : 'refused', failure, { leaveBehind: 'draft state may have changed' })
-      : forgeOperation(op, op === 'pr.view' ? { pr: current } : { target: { repo: current.repo, number: current.number }, outcome: 'applied', changed: writes.at(-1) === op, pr: current })
-    : op === 'pr.view' ? JSON.stringify(ghRow) : '';
+  const stdout = failure
+    ? forgeFailure(op, scenario === 'unknown' ? 'outcome_unknown' : scenario === 'readback-failed' ? 'verification_failed' : 'refused', failure, { leaveBehind: 'draft state may have changed' })
+    : forgeOperation(op, op === 'pr.view' ? { pr: current } : { target: { repo: current.repo, number: current.number }, outcome: 'applied', changed: writes.at(-1) === op, pr: current });
   return { exitCode: failure ? 1 : 0, stdout: Buffer.from(stdout), stderr: Buffer.from(failure ?? '') };
 };
 Object.defineProperty(Bun, 'spawnSync', { value: (argv, settings) => {
-  const isGh = argv[0] === 'gh' && argv[1] === 'pr';
   const forgeAt = argv.indexOf('forge');
-  const isForge = forgeAt >= 0 && ['pr.view', 'pr.ready', 'pr.draft'].includes(argv[forgeAt + 1]);
-  if (!isGh && !isForge) return delegate(argv, settings);
-  if ((selected === 'gh') !== isGh) throw new Error('unexpected forge source');
-  const op = isGh ? argv[2] === 'view' ? 'pr.view' : argv.includes('--undo') ? 'pr.draft' : 'pr.ready' : argv[forgeAt + 1];
+  if (forgeAt < 0 || !['pr.view', 'pr.ready', 'pr.draft'].includes(argv[forgeAt + 1])) return delegate(argv, settings);
+  const op = argv[forgeAt + 1];
   calls.push(op);
   if (scenario === 'prewrite') current.head_revision = '${HEAD_B}';
   if (readyReturned && !correctionStarted) {
@@ -412,7 +398,7 @@ Object.defineProperty(Bun, 'spawnSync', { value: (argv, settings) => {
     writes.push(op);
     current.is_draft = false;
     if (scenario !== 'matching') current.head_revision = '${HEAD_B}';
-    if (selected === 'forge') readyReturned = true;
+    readyReturned = true;
     return response(op);
   }
   if (current.state !== 'open') { correctionFailed = true; return response(op, 'cannot draft ' + current.state); }
@@ -426,8 +412,7 @@ Object.defineProperty(Bun, 'spawnSync', { value: (argv, settings) => {
   current.is_draft = true;
   if (scenario === 'readback-failed') {
     correctionFailed = true;
-    if (selected === 'forge') return response(op, 'read-back unavailable');
-    failReadback = true;
+    return response(op, 'read-back unavailable');
   }
   return response(op);
 } });
@@ -444,16 +429,16 @@ function failedCorrection(scenario: ReadyCase): boolean {
   return ['refused', 'unknown', 'diagnostic-failed', 'closed', 'merged', 'readback-failed'].includes(scenario);
 }
 
-function expectCorrectionError(result: ScriptRun, observed: ReadyObservation, scenario: ReadyCase, source: 'gh' | 'forge'): void {
+function expectCorrectionError(result: ScriptRun, observed: ReadyObservation, scenario: ReadyCase): void {
   expect(result.stderr).toContain('draft correction failed');
   expect(result.stderr).toContain('Inspect');
   const expectedError = scenario === 'closed' || scenario === 'merged' ? scenario
     : scenario === 'readback-failed' ? 'read-back unavailable' : 'draft permission denied; mutation evidence retained';
   expect(result.stderr).toContain(expectedError);
   expect(observed.calls.at(-1)).toBe('pr.view');
-  if (source === 'forge') expect(result.stderr).toContain('draft state may have changed');
+  expect(result.stderr).toContain('draft state may have changed');
   if (scenario === 'unknown') expect(result.stderr).toContain('outcome_unknown');
-  if (scenario === 'readback-failed' && source === 'forge') expect(result.stderr).toContain('verification_failed');
+  if (scenario === 'readback-failed') expect(result.stderr).toContain('verification_failed');
   if (scenario === 'diagnostic-failed') {
     expect(result.stderr).toContain('final state unknown');
     expect(result.stderr).toContain('diagnostic unavailable');
@@ -474,8 +459,8 @@ function expectDraftObservation(result: ScriptRun, observed: ReadyObservation, s
 
 describe('the build queue scripts', () => {
   describe('the ready transition', () => {
-    for (const source of ['gh', 'forge'] as const) {
-      test.each(READY_CASES.filter(scenario => source === 'forge' || scenario !== 'unknown'))(`${source}: %s`, scenario => {
+    {
+      test.each([...READY_CASES])('%s', scenario => {
         const at = install();
         seed(at, triaged(CLAIMED));
         const before = stored(at);
@@ -486,7 +471,7 @@ describe('the build queue scripts', () => {
           INPUTS_PULL_REQUEST: JSON.stringify(forgePrRecord({ head_revision: HEAD_A })),
           INPUTS_ENDING: 'null',
           INPUTS_ANSWER: 'null',
-        }, { source, preload: readyPreload(source, scenario) });
+        }, { preload: readyPreload(scenario) });
         const observed = JSON.parse(readFileSync(join(result.artifacts, 'ready-state.json'), 'utf8')) as ReadyObservation;
         if (scenario === 'matching') {
           expect(ok(result).summary).toContain(`marked ready at ${HEAD_A}`);
@@ -507,11 +492,11 @@ describe('the build queue scripts', () => {
         }
         const noDraftWrite = ['already-draft', 'closed', 'merged'].includes(scenario);
         expect(observed.writes).toEqual(noDraftWrite ? ['pr.ready'] : ['pr.ready', 'pr.draft']);
-        if (failedCorrection(scenario)) expectCorrectionError(result, observed, scenario, source);
+        if (failedCorrection(scenario)) expectCorrectionError(result, observed, scenario);
         else expectDraftObservation(result, observed, scenario);
         if (scenario === 'readback-failed') expect(observed.current.is_draft).toBe(true);
         if (['refused', 'unknown', 'diagnostic-failed'].includes(scenario)) expect(observed.current.is_draft).toBe(false);
-        expect(observed.calls.filter(op => op === 'pr.draft')).toHaveLength(source === 'gh' && noDraftWrite ? 0 : 1);
+        expect(observed.calls.filter(op => op === 'pr.draft')).toHaveLength(1);
       });
     }
   });
@@ -572,9 +557,9 @@ describe('the build queue scripts', () => {
     const unresolved = { ...round('r2', AT), reason: 'pr_create_unresolved', pr_url: '' };
     const doc = triaged({}, record({ status: 'parked', rounds: [unresolved] }));
     seed(at, { ...doc, facts: { ...doc.facts, triage: { ...TRIAGE, at: '2026-10-16T03:00:00.000Z', pull_request: 42 } } });
-    const result = run(at, 'facts', {}, { source: 'gh' });
+    const result = run(at, 'facts', {});
     expect(ok(result)).toMatchObject({ path: 'route', pull_request: { number: 42, state: 'open' }, continues: 42, branch: 'build/7-an-issue-run-1' });
-    expect(result.gh.some(call => call.startsWith('pr view 42'))).toBe(true);
+    expect(forgeCalls(result).some(call => call.op === 'pr.view')).toBe(true);
   });
 
   test("facts puts an item with an open pull request on that pull request's branch, and names a first round's branch after the issue", () => {
@@ -608,14 +593,10 @@ describe('the build queue scripts', () => {
     const branch = 'build/7-an-issue-run-1';
     const cancelled = { INTAKE_RUN_STATUSES: '{"run-1":"cancelled"}', WORKFLOW_ID: 'run-2' };
     seed(at, triaged({ claim: { run_id: 'run-1', at: AT, requests: [], branch } }));
-    // The run's pull request was closed before the release; it is still the run's round.
-    const picked = ok(run(at, 'facts', cancelled, { pr: { state: 'CLOSED', headRefName: branch } }));
+    expect(ok(run(at, 'facts', cancelled, { pr: { headRefName: branch } }))).toMatchObject({ continues: 42 });
     expect(stored(at).value?.facts.build?.rounds).toEqual([
       expect.objectContaining({ run_id: 'run-1', delivered: false, reason: 'ended_undecided', pr_url: 'https://ghe.example.com/example/repo/pull/42' }),
     ]);
-    expect(picked).toMatchObject({ pull_request: { number: 42 }, branch: 'build/7-an-issue-run-2' });
-    seed(at, triaged({ claim: { run_id: 'run-1', at: AT, requests: [], branch } }));
-    expect(ok(run(at, 'facts', cancelled, { pr: { headRefName: branch } }))).toMatchObject({ continues: 42 });
     // A run whose branch opened no pull request leaves no round.
     seed(at, triaged({ claim: { run_id: 'run-1', at: AT, requests: [], branch } }));
     expect(ok(run(at, 'facts', cancelled))).toMatchObject({ pull_request: null, continues: null });
@@ -664,7 +645,7 @@ describe('the build queue scripts', () => {
       INPUTS_RETRIAGE: JSON.stringify([{ number: 8, reason: 'its dependency merged' }]),
     }, { issue: { number: 8 } });
     expect(ok(sent)).toMatchObject({ retriaged: [8] });
-    expect(sent.gh).toContain(`issue edit 8 --repo ${PR.repo.host}/${PR.repo.path} --add-label archon-triage`);
+    expect(labelWrites(sent, 8).add).toEqual(['archon-triage']);
     expect(stored(at).value?.facts.build?.rounds).toEqual([unresolved]);
   }, 60_000);
 
@@ -685,7 +666,7 @@ describe('the build queue scripts', () => {
 
     const sent = retriage([{ number: 7, reason: '#5 merged' }]);
     expect(ok(sent)).toMatchObject({ retriaged: [7] });
-    expect(sent.gh).toContain(`issue edit 7 --repo ${PR.repo.host}/${PR.repo.path} --add-label archon-triage`);
+    expect(labelWrites(sent, 7).add).toEqual(['archon-triage']);
     const launch = readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[]).find(argv => argv[1] === 'run');
     expect(launch).toEqual(expect.arrayContaining(['archon-intake', 'number=7', 'action=added', 'label=archon-triage', 'label_actor=maintainer', '--detach']));
     expect(ok(run(at, 'blocked', { WORKFLOW_ID: 'run-2', INPUTS_RETRIAGE_AS: 'maintainer' })).blocked).toEqual([]);
@@ -956,7 +937,7 @@ describe('the build queue scripts', () => {
       { writeLost: true }
     );
     expect(lost.code).not.toBe(0);
-    expect(lost.stderr).toContain('does not read back with the section');
+    expect(lost.stderr).toContain('workitem.edit-body verification_failed');
     expect(stored(at).revision).toBe(before);
   }, 60_000);
 });
@@ -1025,7 +1006,7 @@ Object.defineProperty(Bun, 'spawnSync', { value: (argv, settings) => {
   return { exitCode: value === null ? 1 : 0, stdout: Buffer.from(JSON.stringify(body)), stderr: Buffer.from('') };
 } });
 `;
-    expect(emitted(run(at, 'checkout', inputs, { source: 'forge', preload: forge, pr: { headRefOid: head } }))).toEqual({ head, reviewed, pull_request: 42 });
+    expect(emitted(run(at, 'checkout', inputs, { preload: forge, pr: { headRefOid: head } }))).toEqual({ head, reviewed, pull_request: 42 });
   }, 60_000);
 
   test('a round route declares fresh stays on the base and tells ship none, and route cannot name a pull request facts did not offer', () => {
