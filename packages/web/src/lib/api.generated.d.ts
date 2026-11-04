@@ -4794,7 +4794,15 @@ export interface components {
           options: {
             id: string;
             label?: string;
+            does?: string;
+            value?: unknown;
           }[];
+          recommendation?: {
+            option: string;
+            why: string;
+            /** @enum {string} */
+            confidence?: 'low' | 'medium' | 'high';
+          };
         }
       | {
           /** @enum {string} */
@@ -5504,7 +5512,17 @@ export interface components {
               | {
                   id: string;
                   label?: string;
+                  does?: string;
+                  value?: unknown;
                 }[]
+              | string;
+            recommendation?:
+              | {
+                  option: string;
+                  why: string;
+                  /** @enum {string} */
+                  confidence?: 'low' | 'medium' | 'high';
+                }
               | string;
             labels?: {
               [key: string]: string;
@@ -6281,7 +6299,15 @@ export interface components {
           options?: {
             id: string;
             label?: string;
+            does?: string;
+            value?: unknown;
           }[];
+          recommendation?: {
+            option: string;
+            why: string;
+            /** @enum {string} */
+            confidence?: 'low' | 'medium' | 'high';
+          };
           answer?:
             | {
                 text: string;
@@ -6415,7 +6441,15 @@ export interface components {
           options?: {
             id: string;
             label?: string;
+            does?: string;
+            value?: unknown;
           }[];
+          recommendation?: {
+            option: string;
+            why: string;
+            /** @enum {string} */
+            confidence?: 'low' | 'medium' | 'high';
+          };
           answer?:
             | {
                 text: string;
@@ -6493,7 +6527,15 @@ export interface components {
           options: {
             id: string;
             label?: string;
+            does?: string;
+            value?: unknown;
           }[];
+          recommendation?: {
+            option: string;
+            why: string;
+            /** @enum {string} */
+            confidence?: 'low' | 'medium' | 'high';
+          };
         }
       | {
           /** @enum {string} */
@@ -6668,7 +6710,15 @@ export interface components {
             options: {
               id: string;
               label?: string;
+              does?: string;
+              value?: unknown;
             }[];
+            recommendation?: {
+              option: string;
+              why: string;
+              /** @enum {string} */
+              confidence?: 'low' | 'medium' | 'high';
+            };
           }
         | {
             /** @enum {string} */
