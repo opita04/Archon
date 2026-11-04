@@ -276,11 +276,6 @@ export function withBuild(doc: WorkItem, change: BuildChange): WorkItem {
 export const ENDED_UNDECIDED = 'ended_undecided';
 
 /**
- * The work item with the round a released build claim's run left: the pull request
- * whose head is the branch the claim recorded. A run that opened none, and a run that
- * recorded its round before it stopped, such as one that asked, add nothing.
- */
-/**
  * Start the item's next build-queue round now, through the operator's build-queue
  * binding (`build_queue_binding`). One run starts at most one next round per item.
  */
@@ -294,6 +289,11 @@ export function nextRound(item: QualifiedPr, runId: string): string {
   );
 }
 
+/**
+ * The work item with the round a released build claim's run left: the pull request
+ * whose head is the branch the claim recorded. A run that opened none, and a run that
+ * recorded its round before it stopped, such as one that asked, add nothing.
+ */
 export function withReleasedRound(doc: WorkItem, claim: Claim, status: string, at: string): WorkItem {
   const prior = doc.facts.build;
   if (claim.branch === undefined || prior?.rounds.some(round => round.run_id === claim.run_id)) return doc;
