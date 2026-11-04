@@ -26,6 +26,7 @@ record:
   summary: "stub: PR 42 went back to the build queue"
   attention: ""
   options: []
+  recommendation: null
   class: ""
   asked: null
 retriage:

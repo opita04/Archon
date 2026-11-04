@@ -28,6 +28,7 @@ apply:
   summary: "stub: marked ready without a round"
   attention: ""
   options: []
+  recommendation: null
   class: ""
   asked: null
 fixture:

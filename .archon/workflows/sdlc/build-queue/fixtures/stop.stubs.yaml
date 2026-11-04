@@ -65,7 +65,10 @@ apply:
   decision: asked
   summary: "stub: Issue 7: asked."
   attention: "stub: the attention message"
-  options: [{ id: narrow, label: "stub: narrow it" }, { id: park, label: "stub: park it" }]
+  options:
+    - { id: narrow, label: "stub: narrow it", does: "stub: continues on the narrower scope", value: { id: narrow, label: "stub: narrow it", does: "stub: continues on the narrower scope", effect: continue, ruling: "stub: acceptance drops A4" } }
+    - { id: park, label: "stub: park it", does: "stub: stops working it", value: { id: park, label: "stub: park it", does: "stub: stops working it", effect: park, ruling: "" } }
+  recommendation: { option: narrow, why: "stub: why", confidence: medium }
   class: stop
   asked: { attention: {}, brief: "stub: continue PR 8", by: stop }
 ask: { decision: narrow, text: "stub: drop A4" }

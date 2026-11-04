@@ -60,7 +60,11 @@ function answer(previous: Settled | null, choice: string | null, outcome: unknow
     inputs: {
       INPUTS_OUTCOME: outcome === null ? '' : JSON.stringify(outcome),
       INPUTS_PREVIOUS: previous === null ? '' : JSON.stringify(previous),
-      INPUTS_ANSWER: choice === null ? '' : JSON.stringify({ decision: choice, text: 'my note' }),
+      // The wait's output: the chosen option's value is the choice itself.
+      INPUTS_ANSWER:
+        choice === null
+          ? ''
+          : JSON.stringify({ decision: choice, text: 'my note', value: previous?.options.find(option => option.id === choice)?.value }),
     },
   });
 }
@@ -68,22 +72,24 @@ function answer(previous: Settled | null, choice: string | null, outcome: unknow
 describe('settle', () => {
   it('ends the loop on a done decision, with nothing asked', () => {
     expect(settled({ decision: 'done', reason: 'ready', pull_request: null, attention: null })).toEqual({
-      done: true, outcome: OUTCOME, message: '', options: [], asked: null, brief: '',
+      done: true, outcome: OUTCOME, message: '', options: [], recommendation: null, asked: null, brief: '',
     });
   });
 
-  it('renders every field of an asked item and offers its choices', () => {
+  it('asks with every field of the item: choices and recommendation on the wait, the rest in the message', () => {
     const out = settled(ask([RERUN, FINISH], 'rerun'));
     expect(out.done).toBe(false);
     expect(out.outcome).toEqual(OUTCOME);
-    expect(out.options).toEqual([{ id: 'rerun', label: 'Deliver again' }, { id: 'finish', label: 'Leave it' }]);
+    expect(out.options).toEqual([
+      { id: 'rerun', label: 'Deliver again', does: 'Runs another batch', value: { ...RERUN, effect: 'rerun', ruling: '' } },
+      { id: 'finish', label: 'Leave it', does: 'Ends the run', value: { ...FINISH, effect: 'finish', ruling: '' } },
+    ]);
+    expect(out.recommendation).toEqual({ option: 'rerun', why: 'mechanical', confidence: 'medium' });
     for (const field of [
       '**What it is.** Delivery ran out of rounds',
       '**Why it matters.** The pull request stays a draft',
-      '**Recommendation: `rerun`** (medium confidence). mechanical',
-      'Evidence: ci.md',
+      '**Evidence for the recommendation.** ci.md',
       'What would change it: a design question',
-      '- `rerun` (Deliver again): Runs another batch',
       '**If nobody answers.** The run stays paused',
       `- ${PR_URL}`,
     ]) expect(out.message).toContain(field);
@@ -155,11 +161,5 @@ describe('answer', () => {
     const run = answer(previous, choice, outcome);
     expect(run.code, run.stderr).toBe(0);
     expect(JSON.parse(run.stdout)).toMatchObject({ judge: false, outcome });
-  });
-
-  it('refuses an answer the item never offered', () => {
-    const run = answer(settled(ask([RERUN, FINISH], 'rerun')), 'ready', null);
-    expect(run.code).not.toBe(0);
-    expect(run.stderr).toContain('the answer "ready" is not one of the choices');
   });
 });

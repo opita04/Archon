@@ -51,6 +51,7 @@ apply:
   summary: "stub: Issue 7: ready."
   attention: ""
   options: []
+  recommendation: null
   class: ""
   asked: null
 fixture:
