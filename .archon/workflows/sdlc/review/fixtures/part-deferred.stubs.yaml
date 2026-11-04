@@ -10,7 +10,7 @@ scope:
   pr: null
   report: { type: archon_artifact, run_id: "fixture-run", path: "review/scope.md" }
 docs: "0 findings"
-review-complete: "settled"
+review-complete: { seams: skipped, code: skipped, tests: skipped, errors: skipped, docs: completed }
 synthesize:
   ready: true
   action: none
